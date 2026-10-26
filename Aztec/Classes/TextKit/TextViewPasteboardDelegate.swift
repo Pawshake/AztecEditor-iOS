@@ -191,11 +191,12 @@ final class PendingPaste {
     }
 
     func start() {
-        guard let textView = currentTextView else { return }
+        guard let textView = currentTextView else { NSLog("AZTEC_FLOW start stale"); return }
         while let candidate = candidates.first, representations[candidate.type] != nil {
             candidates.removeFirst()
         }
         guard let candidate = candidates.popFirst() else {
+            NSLog("%@", "AZTEC_FLOW finish types=\(representations.mapValues { $0.count })")
             textView.loadedPasteboardContent = LoadedPasteboardContent(representations: representations)
             let pasted: Bool
             if matchingStyle {
@@ -212,9 +213,11 @@ final class PendingPaste {
             }
             return
         }
+        NSLog("%@", "AZTEC_FLOW request type=\(candidate.type)")
         let didLoad: (Data?) -> Void = { data in
+            NSLog("%@", "AZTEC_FLOW response type=\(candidate.type) bytes=\(data?.count ?? -1)")
             DispatchQueue.main.async {
-                guard self.currentTextView != nil else { return }
+                guard self.currentTextView != nil else { NSLog("AZTEC_FLOW response stale"); return }
                 if let data = data {
                     self.representations[candidate.type] = data
                 }
