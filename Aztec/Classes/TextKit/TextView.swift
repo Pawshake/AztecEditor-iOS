@@ -530,17 +530,17 @@ open class TextView: UITextView {
     }
 
     open override func paste(_ sender: Any?) {
-        pasteUsingItemProviders(matchingStyle: false)
+        paste(itemProviders: pasteboard.itemProviders, matchingStyle: false)
     }
 
     @objc open func pasteWithoutFormatting(_ sender: Any?) {
-        pasteUsingItemProviders(matchingStyle: true)
+        paste(itemProviders: pasteboard.itemProviders, matchingStyle: true)
     }
 
-    private func pasteUsingItemProviders(matchingStyle: Bool) {
+    func paste(itemProviders: [NSItemProvider], matchingStyle: Bool) {
         let identifier = UUID()
         pendingPasteIdentifier = identifier
-        PendingPaste(textView: self, identifier: identifier, matchingStyle: matchingStyle).start()
+        PendingPaste(textView: self, identifier: identifier, matchingStyle: matchingStyle, providers: itemProviders).start()
     }
 
     // MARK: - Intercept Keystrokes

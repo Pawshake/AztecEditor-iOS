@@ -2130,11 +2130,6 @@ class TextViewTests: XCTestCase {
 }
 
 final class PendingPasteTests: XCTestCase {
-    override func setUp() {
-        super.setUp()
-        UIPasteboard.forTesting.reset()
-    }
-
     func testPasteReturnsBeforeProviderCompletes() {
         assertPasteReturnsBeforeProviderCompletes(matchingStyle: false)
     }
@@ -2144,34 +2139,17 @@ final class PendingPasteTests: XCTestCase {
     }
 
     private func assertPasteReturnsBeforeProviderCompletes(matchingStyle: Bool) {
-        let content = PasteReturnGatedContent()
-        NSLog("AZTEC_PASTE_TEST setter begin")
-        UIPasteboard.forTesting.setItemProviders([content.provider], localOnly: true, expirationDate: nil)
-        NSLog("%@", "AZTEC_PASTE_TEST setter returned delivered=\(content.hasDelivered)")
-        NSLog("AZTEC_PASTE_TEST text view setup begin")
         let textView = TextViewStub(withHTML: "before")
         textView.selectedRange = NSRange(location: textView.text.utf16.count, length: 0)
+        let content = PasteReturnGatedContent()
         let changed = XCTNSNotificationExpectation(name: UITextView.textDidChangeNotification, object: textView)
-        NSLog("%@", "AZTEC_PASTE_TEST setup returned delivered=\(content.hasDelivered)")
         XCTAssertFalse(content.hasDelivered, "The provider must remain deferred before paste starts")
-        guard !content.hasDelivered else {
-            content.allowDelivery()
-            return
-        }
 
-        NSLog("AZTEC_PASTE_TEST paste action begin")
-        if matchingStyle {
-            textView.pasteWithoutFormatting(nil)
-        } else {
-            textView.paste(nil)
-        }
-        NSLog("%@", "AZTEC_PASTE_TEST paste action returned delivered=\(content.hasDelivered)")
+        textView.paste(itemProviders: [content.provider], matchingStyle: matchingStyle)
 
         XCTAssertFalse(content.hasDelivered, "Paste must return before clipboard data is delivered")
         content.allowDelivery()
-        NSLog("AZTEC_PASTE_TEST provider delivery released")
         wait(for: [changed], timeout: 5)
-        NSLog("AZTEC_PASTE_TEST notification wait returned")
         XCTAssertEqual(textView.text, "before after")
     }
 
@@ -2181,12 +2159,11 @@ final class PendingPasteTests: XCTestCase {
             completion(Data([1]), nil)
             return nil
         }
-        UIPasteboard.forTesting.setItemProviders([provider], localOnly: true, expirationDate: nil)
         let textView = TextViewStub(withHTML: "")
         let delegate = CustomClipboardDelegate()
         textView.pasteboardDelegate = delegate
 
-        textView.paste(nil)
+        textView.paste(itemProviders: [provider], matchingStyle: false)
 
         XCTAssertEqual(delegate.pasteCount, 1)
         XCTAssertEqual(textView.text, "custom clipboard")
@@ -2203,13 +2180,12 @@ final class PendingPasteTests: XCTestCase {
             completion(Data("captured text".utf8), nil)
             return nil
         }
-        UIPasteboard.forTesting.setItemProviders([provider], localOnly: true, expirationDate: nil)
         let textView = TextViewStub(withHTML: "")
         let delegate = CapturedURLClipboardDelegate()
         textView.pasteboardDelegate = delegate
         let changed = XCTNSNotificationExpectation(name: UITextView.textDidChangeNotification, object: textView)
 
-        textView.paste(nil)
+        textView.paste(itemProviders: [provider], matchingStyle: false)
 
         wait(for: [changed], timeout: 5)
         XCTAssertEqual(delegate.pasteCount, 1)
@@ -2219,11 +2195,10 @@ final class PendingPasteTests: XCTestCase {
 
     func testPasteReturnsBeforeDeferredClipboardContentIsAvailable() {
         let content = DeferredPasteContent(requested: expectation(description: "provider requested"))
-        UIPasteboard.forTesting.setItemProviders([content.provider], localOnly: true, expirationDate: nil)
         let textView = TextViewStub(withHTML: "before")
         textView.selectedRange = NSRange(location: textView.text.utf16.count, length: 0)
 
-        textView.paste(nil)
+        textView.paste(itemProviders: [content.provider], matchingStyle: false)
 
         XCTAssertEqual(textView.text, "before")
         wait(for: [content.requested], timeout: 3)
@@ -2235,9 +2210,8 @@ final class PendingPasteTests: XCTestCase {
 
     func testDeferredPasteDoesNotOverwriteEditedDocument() {
         let content = DeferredPasteContent(requested: expectation(description: "provider requested"))
-        UIPasteboard.forTesting.setItemProviders([content.provider], localOnly: true, expirationDate: nil)
         let textView = TextViewStub(withHTML: "before")
-        textView.paste(nil)
+        textView.paste(itemProviders: [content.provider], matchingStyle: false)
         wait(for: [content.requested], timeout: 3)
         textView.text = "changed"
 
@@ -2250,10 +2224,9 @@ final class PendingPasteTests: XCTestCase {
 
     func testDeferredPasteDoesNotFollowChangedSelection() {
         let content = DeferredPasteContent(requested: expectation(description: "provider requested"))
-        UIPasteboard.forTesting.setItemProviders([content.provider], localOnly: true, expirationDate: nil)
         let textView = TextViewStub(withHTML: "before")
         textView.selectedRange = NSRange(location: textView.text.utf16.count, length: 0)
-        textView.paste(nil)
+        textView.paste(itemProviders: [content.provider], matchingStyle: false)
         wait(for: [content.requested], timeout: 3)
         textView.selectedRange = NSRange(location: 0, length: 0)
 
@@ -2269,8 +2242,7 @@ final class PendingPasteTests: XCTestCase {
         let textView = TextViewStub(withHTML: "before")
         window.addSubview(textView)
         let content = DeferredPasteContent(requested: expectation(description: "provider requested"))
-        UIPasteboard.forTesting.setItemProviders([content.provider], localOnly: true, expirationDate: nil)
-        textView.paste(nil)
+        textView.paste(itemProviders: [content.provider], matchingStyle: false)
         wait(for: [content.requested], timeout: 3)
         textView.removeFromSuperview()
 
@@ -2285,11 +2257,9 @@ final class PendingPasteTests: XCTestCase {
         let first = DeferredPasteContent(requested: expectation(description: "first provider requested"))
         let second = DeferredPasteContent(requested: expectation(description: "second provider requested"))
         let textView = TextViewStub(withHTML: "")
-        UIPasteboard.forTesting.setItemProviders([first.provider], localOnly: true, expirationDate: nil)
-        textView.paste(nil)
+        textView.paste(itemProviders: [first.provider], matchingStyle: false)
         wait(for: [first.requested], timeout: 3)
-        UIPasteboard.forTesting.setItemProviders([second.provider], localOnly: true, expirationDate: nil)
-        textView.paste(nil)
+        textView.paste(itemProviders: [second.provider], matchingStyle: false)
         wait(for: [second.requested], timeout: 3)
 
         let changed = XCTNSNotificationExpectation(name: UITextView.textDidChangeNotification, object: textView)
@@ -2312,11 +2282,10 @@ final class PendingPasteTests: XCTestCase {
             completion(Data("plain fallback".utf8), nil)
             return nil
         }
-        UIPasteboard.forTesting.setItemProviders([provider], localOnly: true, expirationDate: nil)
         let textView = TextViewStub(withHTML: "")
         let changed = XCTNSNotificationExpectation(name: UITextView.textDidChangeNotification, object: textView)
 
-        textView.paste(nil)
+        textView.paste(itemProviders: [provider], matchingStyle: false)
 
         wait(for: [changed], timeout: 3)
         XCTAssertEqual(textView.text, "plain fallback")
@@ -2324,12 +2293,11 @@ final class PendingPasteTests: XCTestCase {
 
     func testDeferredPasteStillAllowsDelegateToRejectReplacement() {
         let content = DeferredPasteContent(requested: expectation(description: "provider requested"))
-        UIPasteboard.forTesting.setItemProviders([content.provider], localOnly: true, expirationDate: nil)
         let textView = TextViewStub(withHTML: "before")
         let validated = expectation(description: "replacement validated")
         let delegate = RejectingPasteDelegate(validated: validated)
         textView.delegate = delegate
-        textView.paste(nil)
+        textView.paste(itemProviders: [content.provider], matchingStyle: false)
         wait(for: [content.requested], timeout: 3)
 
         content.finish(with: Data("replacement".utf8))
@@ -2349,11 +2317,10 @@ final class PendingPasteTests: XCTestCase {
             completion(Data("fallback".utf8), nil)
             return nil
         }
-        UIPasteboard.forTesting.setItemProviders([failed, fallback], localOnly: true, expirationDate: nil)
         let textView = TextViewStub(withHTML: "")
         let changed = XCTNSNotificationExpectation(name: UITextView.textDidChangeNotification, object: textView)
 
-        textView.paste(nil)
+        textView.paste(itemProviders: [failed, fallback], matchingStyle: false)
 
         wait(for: [changed], timeout: 3)
         XCTAssertEqual(textView.text, "fallback")
@@ -2375,21 +2342,16 @@ private final class PasteReturnGatedContent {
     init() {
         gate.enter()
         provider.registerDataRepresentation(forTypeIdentifier: UIPasteboard.UTType.plainText.identifier, visibility: .all) { [weak self] completion in
-            NSLog("%@", "AZTEC_PASTE_TEST provider loader entered main=\(Thread.isMainThread)")
             guard let self = self else {
-                NSLog("AZTEC_PASTE_TEST provider helper already released")
+                completion(nil, NSError(domain: "PendingPasteTests", code: -1))
                 return nil
             }
             DispatchQueue.global().async {
-                NSLog("AZTEC_PASTE_TEST provider gate wait begin")
-                let result = self.gate.wait(timeout: .now() + 2)
-                NSLog("%@", "AZTEC_PASTE_TEST provider gate returned timedOut=\(result == .timedOut)")
+                _ = self.gate.wait(timeout: .now() + 2)
                 self.lock.lock()
                 self.delivered = true
                 self.lock.unlock()
-                NSLog("AZTEC_PASTE_TEST provider completion begin")
                 completion(Data(" after".utf8), nil)
-                NSLog("AZTEC_PASTE_TEST provider completion returned")
             }
             return nil
         }
@@ -2433,7 +2395,10 @@ private final class DeferredPasteContent {
         self.requested = requested
         provider.registerDataRepresentation(forTypeIdentifier: UIPasteboard.UTType.plainText.identifier, visibility: .all) { [weak self] completion in
             DispatchQueue.main.async {
-                guard let self = self else { return }
+                guard let self = self else {
+                    completion(nil, NSError(domain: "PendingPasteTests", code: -1))
+                    return
+                }
                 if let value = self.value {
                     completion(value, nil)
                 } else {
