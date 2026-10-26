@@ -24,6 +24,16 @@ class TextViewTests: XCTestCase {
     }
 
 
+    private func pasteAndWait(in textView: TextView, matchingStyle: Bool = false) {
+        let changed = XCTNSNotificationExpectation(name: UITextView.textDidChangeNotification, object: textView)
+        if matchingStyle {
+            textView.pasteWithoutFormatting(nil)
+        } else {
+            textView.paste(nil)
+        }
+        wait(for: [changed], timeout: 3)
+    }
+
     // MARK: - TextView construction
 
     func createTextViewWithContent() -> TextView {
@@ -1479,7 +1489,7 @@ class TextViewTests: XCTestCase {
         sourceTextView.copy(nil)
         
         targetTextView.selectedRange = NSRange(location: targetTextView.text.count, length: 0)
-        targetTextView.paste(nil)
+        pasteAndWait(in: targetTextView)
         
         XCTAssertEqual(targetTextView.getHTML(), "<p><strong>Pasted: </strong><em>This is an image <img src=\"image.jpg\"></em></p>")
     }
@@ -1495,7 +1505,7 @@ class TextViewTests: XCTestCase {
         sourceTextView.copy(nil)
         
         targetTextView.selectedRange = NSRange(location: targetTextView.text.count, length: 0)
-        targetTextView.pasteWithoutFormatting(nil)
+        pasteAndWait(in: targetTextView, matchingStyle: true)
         
         XCTAssertEqual(targetTextView.getHTML(), "<p><strong>Pasted: This is an image <img src=\"image.jpg\"></strong></p>")
     }
@@ -1519,7 +1529,7 @@ class TextViewTests: XCTestCase {
         sourceTextView.copy(nil)
         
         targetTextView.selectedRange = NSRange(location: targetTextView.text.count, length: 0)
-        targetTextView.paste(nil)
+        pasteAndWait(in: targetTextView)
         
         XCTAssertEqual(targetTextView.getHTML(), "<p><strong>Pasted: </strong><em>This is a video <video src=\"video.mp4\" poster=\"video.jpg\"></video></em></p>")
     }
@@ -1535,7 +1545,7 @@ class TextViewTests: XCTestCase {
         sourceTextView.copy(nil)
         
         targetTextView.selectedRange = NSRange(location: targetTextView.text.count, length: 0)
-        targetTextView.pasteWithoutFormatting(nil)
+        pasteAndWait(in: targetTextView, matchingStyle: true)
         
         XCTAssertEqual(targetTextView.getHTML(), "<p><strong>Pasted: This is a video <video src=\"video.mp4\" poster=\"video.jpg\"></video></strong></p>")
     }
@@ -1987,7 +1997,7 @@ class TextViewTests: XCTestCase {
         let url = URL(string: "http://wordpress.com")!
         UIPasteboard.forTesting.setValue(url, forPasteboardType: UIPasteboard.UTType.URL.identifier)
 
-        textView.paste(nil)
+        pasteAndWait(in: textView)
 
         let html = "<p><a href=\"http://wordpress.com\">http://wordpress.com</a></p>"
         XCTAssertEqual(textView.getHTML(prettify: false), html)
@@ -1999,7 +2009,7 @@ class TextViewTests: XCTestCase {
         let url = URL(string: "http://wordpress.com")!
         UIPasteboard.forTesting.setValue(url, forPasteboardType: UIPasteboard.UTType.URL.identifier)
         textView.selectedRange = NSRange(location: 0, length: 9)
-        textView.paste(nil)
+        pasteAndWait(in: textView)
 
         let html = "<p><a href=\"http://wordpress.com\">WordPress</a></p>"
         XCTAssertEqual(textView.getHTML(prettify: false), html)
@@ -2086,7 +2096,7 @@ class TextViewTests: XCTestCase {
         UIPasteboard.forTesting.setItems([pasteItems], options: [:])
         let textView = TextViewStub(withHTML: "")
         textView.textColor = UIColor.red
-        textView.paste(nil)
+        pasteAndWait(in: textView)
 
         let attributedString = textView.attributedText!
 
@@ -2117,4 +2127,325 @@ class TextViewTests: XCTestCase {
         XCTAssertEqual(htmlTwoLinks, "<p><a href=\"www.worpdress.com\">WordPress</a><a href=\"www.jetpack.com\">워드 프레스</a></p>")
     }
 
+}
+
+final class PendingPasteTests: XCTestCase {
+    override func setUp() {
+        super.setUp()
+        UIPasteboard.forTesting.reset()
+    }
+
+    func testPasteReturnsBeforeProviderCompletes() {
+        assertPasteReturnsBeforeProviderCompletes(matchingStyle: false)
+    }
+
+    func testPasteWithoutFormattingReturnsBeforeProviderCompletes() {
+        assertPasteReturnsBeforeProviderCompletes(matchingStyle: true)
+    }
+
+    private func assertPasteReturnsBeforeProviderCompletes(matchingStyle: Bool) {
+        let content = PasteReturnGatedContent()
+        UIPasteboard.forTesting.setItemProviders([content.provider], localOnly: true, expirationDate: nil)
+        let textView = TextViewStub(withHTML: "before")
+        textView.selectedRange = NSRange(location: textView.text.utf16.count, length: 0)
+        let changed = XCTNSNotificationExpectation(name: UITextView.textDidChangeNotification, object: textView)
+
+        if matchingStyle {
+            textView.pasteWithoutFormatting(nil)
+        } else {
+            textView.paste(nil)
+        }
+
+        XCTAssertFalse(content.hasDelivered, "Paste must return before clipboard data is delivered")
+        content.allowDelivery()
+        wait(for: [changed], timeout: 5)
+        XCTAssertEqual(textView.text, "before after")
+    }
+
+    func testCustomPasteDelegateReceivesUnsupportedClipboardType() {
+        let provider = NSItemProvider()
+        provider.registerDataRepresentation(forTypeIdentifier: "org.aztec.custom-paste", visibility: .all) { completion in
+            completion(Data([1]), nil)
+            return nil
+        }
+        UIPasteboard.forTesting.setItemProviders([provider], localOnly: true, expirationDate: nil)
+        let textView = TextViewStub(withHTML: "")
+        let delegate = CustomClipboardDelegate()
+        textView.pasteboardDelegate = delegate
+
+        textView.paste(nil)
+
+        XCTAssertEqual(delegate.pasteCount, 1)
+        XCTAssertEqual(textView.text, "custom clipboard")
+    }
+
+    func testCustomURLDelegateCanPasteCapturedPlainText() {
+        let provider = NSItemProvider()
+        let url = URL(string: "https://example.com/embed")!
+        provider.registerDataRepresentation(forTypeIdentifier: UIPasteboard.UTType.URL.identifier, visibility: .all) { completion in
+            completion(url.dataRepresentation, nil)
+            return nil
+        }
+        provider.registerDataRepresentation(forTypeIdentifier: UIPasteboard.UTType.plainText.identifier, visibility: .all) { completion in
+            completion(Data("captured text".utf8), nil)
+            return nil
+        }
+        UIPasteboard.forTesting.setItemProviders([provider], localOnly: true, expirationDate: nil)
+        let textView = TextViewStub(withHTML: "")
+        let delegate = CapturedURLClipboardDelegate()
+        textView.pasteboardDelegate = delegate
+        let changed = XCTNSNotificationExpectation(name: UITextView.textDidChangeNotification, object: textView)
+
+        textView.paste(nil)
+
+        wait(for: [changed], timeout: 5)
+        XCTAssertEqual(delegate.pasteCount, 1)
+        XCTAssertEqual(delegate.pastedURL, url)
+        XCTAssertEqual(textView.text, "captured text")
+    }
+
+    func testPasteReturnsBeforeDeferredClipboardContentIsAvailable() {
+        let content = DeferredPasteContent(requested: expectation(description: "provider requested"))
+        UIPasteboard.forTesting.setItemProviders([content.provider], localOnly: true, expirationDate: nil)
+        let textView = TextViewStub(withHTML: "before")
+        textView.selectedRange = NSRange(location: textView.text.utf16.count, length: 0)
+
+        textView.paste(nil)
+
+        XCTAssertEqual(textView.text, "before")
+        wait(for: [content.requested], timeout: 3)
+        let changed = XCTNSNotificationExpectation(name: UITextView.textDidChangeNotification, object: textView)
+        content.finish(with: Data(" after".utf8))
+        wait(for: [changed], timeout: 3)
+        XCTAssertEqual(textView.text, "before after")
+    }
+
+    func testDeferredPasteDoesNotOverwriteEditedDocument() {
+        let content = DeferredPasteContent(requested: expectation(description: "provider requested"))
+        UIPasteboard.forTesting.setItemProviders([content.provider], localOnly: true, expirationDate: nil)
+        let textView = TextViewStub(withHTML: "before")
+        textView.paste(nil)
+        wait(for: [content.requested], timeout: 3)
+        textView.text = "changed"
+
+        let changed = XCTNSNotificationExpectation(name: UITextView.textDidChangeNotification, object: textView)
+        changed.isInverted = true
+        content.finish(with: Data("old clipboard".utf8))
+        wait(for: [changed], timeout: 0.3)
+        XCTAssertEqual(textView.text, "changed")
+    }
+
+    func testDeferredPasteDoesNotFollowChangedSelection() {
+        let content = DeferredPasteContent(requested: expectation(description: "provider requested"))
+        UIPasteboard.forTesting.setItemProviders([content.provider], localOnly: true, expirationDate: nil)
+        let textView = TextViewStub(withHTML: "before")
+        textView.selectedRange = NSRange(location: textView.text.utf16.count, length: 0)
+        textView.paste(nil)
+        wait(for: [content.requested], timeout: 3)
+        textView.selectedRange = NSRange(location: 0, length: 0)
+
+        let changed = XCTNSNotificationExpectation(name: UITextView.textDidChangeNotification, object: textView)
+        changed.isInverted = true
+        content.finish(with: Data("old clipboard".utf8))
+        wait(for: [changed], timeout: 0.3)
+        XCTAssertEqual(textView.text, "before")
+    }
+
+    func testDeferredPasteIsDiscardedAfterEditorIsDetached() {
+        let window = UIWindow(frame: UIScreen.main.bounds)
+        let textView = TextViewStub(withHTML: "before")
+        window.addSubview(textView)
+        let content = DeferredPasteContent(requested: expectation(description: "provider requested"))
+        UIPasteboard.forTesting.setItemProviders([content.provider], localOnly: true, expirationDate: nil)
+        textView.paste(nil)
+        wait(for: [content.requested], timeout: 3)
+        textView.removeFromSuperview()
+
+        let changed = XCTNSNotificationExpectation(name: UITextView.textDidChangeNotification, object: textView)
+        changed.isInverted = true
+        content.finish(with: Data("old clipboard".utf8))
+        wait(for: [changed], timeout: 0.3)
+        XCTAssertEqual(textView.text, "before")
+    }
+
+    func testNewPasteSupersedesOlderDeferredPaste() {
+        let first = DeferredPasteContent(requested: expectation(description: "first provider requested"))
+        let second = DeferredPasteContent(requested: expectation(description: "second provider requested"))
+        let textView = TextViewStub(withHTML: "")
+        UIPasteboard.forTesting.setItemProviders([first.provider], localOnly: true, expirationDate: nil)
+        textView.paste(nil)
+        wait(for: [first.requested], timeout: 3)
+        UIPasteboard.forTesting.setItemProviders([second.provider], localOnly: true, expirationDate: nil)
+        textView.paste(nil)
+        wait(for: [second.requested], timeout: 3)
+
+        let changed = XCTNSNotificationExpectation(name: UITextView.textDidChangeNotification, object: textView)
+        second.finish(with: Data("new clipboard".utf8))
+        wait(for: [changed], timeout: 3)
+        let staleChange = XCTNSNotificationExpectation(name: UITextView.textDidChangeNotification, object: textView)
+        staleChange.isInverted = true
+        first.finish(with: Data("old clipboard".utf8))
+        wait(for: [staleChange], timeout: 0.3)
+        XCTAssertEqual(textView.text, "new clipboard")
+    }
+
+    func testUnsupportedHTMLFallsBackToPlainText() {
+        let provider = NSItemProvider()
+        provider.registerDataRepresentation(forTypeIdentifier: UIPasteboard.UTType.html.identifier, visibility: .all) { completion in
+            completion(Data("<body><p>unsupported HTML</p></body>".utf8), nil)
+            return nil
+        }
+        provider.registerDataRepresentation(forTypeIdentifier: UIPasteboard.UTType.plainText.identifier, visibility: .all) { completion in
+            completion(Data("plain fallback".utf8), nil)
+            return nil
+        }
+        UIPasteboard.forTesting.setItemProviders([provider], localOnly: true, expirationDate: nil)
+        let textView = TextViewStub(withHTML: "")
+        let changed = XCTNSNotificationExpectation(name: UITextView.textDidChangeNotification, object: textView)
+
+        textView.paste(nil)
+
+        wait(for: [changed], timeout: 3)
+        XCTAssertEqual(textView.text, "plain fallback")
+    }
+
+    func testDeferredPasteStillAllowsDelegateToRejectReplacement() {
+        let content = DeferredPasteContent(requested: expectation(description: "provider requested"))
+        UIPasteboard.forTesting.setItemProviders([content.provider], localOnly: true, expirationDate: nil)
+        let textView = TextViewStub(withHTML: "before")
+        let validated = expectation(description: "replacement validated")
+        let delegate = RejectingPasteDelegate(validated: validated)
+        textView.delegate = delegate
+        textView.paste(nil)
+        wait(for: [content.requested], timeout: 3)
+
+        content.finish(with: Data("replacement".utf8))
+
+        wait(for: [validated], timeout: 3)
+        XCTAssertEqual(textView.text, "before")
+    }
+
+    func testProviderFailureTriesNextCompatibleProvider() {
+        let failed = NSItemProvider()
+        failed.registerDataRepresentation(forTypeIdentifier: UIPasteboard.UTType.plainText.identifier, visibility: .all) { completion in
+            completion(nil, NSError(domain: "PendingPasteTests", code: -1))
+            return nil
+        }
+        let fallback = NSItemProvider()
+        fallback.registerDataRepresentation(forTypeIdentifier: UIPasteboard.UTType.plainText.identifier, visibility: .all) { completion in
+            completion(Data("fallback".utf8), nil)
+            return nil
+        }
+        UIPasteboard.forTesting.setItemProviders([failed, fallback], localOnly: true, expirationDate: nil)
+        let textView = TextViewStub(withHTML: "")
+        let changed = XCTNSNotificationExpectation(name: UITextView.textDidChangeNotification, object: textView)
+
+        textView.paste(nil)
+
+        wait(for: [changed], timeout: 3)
+        XCTAssertEqual(textView.text, "fallback")
+    }
+}
+
+private final class PasteReturnGatedContent {
+    let provider = NSItemProvider()
+    private let gate = DispatchGroup()
+    private let lock = NSLock()
+    private var delivered = false
+
+    var hasDelivered: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return delivered
+    }
+
+    init() {
+        gate.enter()
+        provider.registerDataRepresentation(forTypeIdentifier: UIPasteboard.UTType.plainText.identifier, visibility: .all) { [weak self] completion in
+            guard let self = self else { return nil }
+            DispatchQueue.global().async {
+                _ = self.gate.wait(timeout: .now() + 2)
+                self.lock.lock()
+                self.delivered = true
+                self.lock.unlock()
+                completion(Data(" after".utf8), nil)
+            }
+            return nil
+        }
+    }
+
+    func allowDelivery() {
+        gate.leave()
+    }
+}
+
+private final class CustomClipboardDelegate: AztecTextViewPasteboardDelegate {
+    private(set) var pasteCount = 0
+
+    override func tryPasting(in textView: TextView) -> Bool {
+        pasteCount += 1
+        textView.insertText("custom clipboard")
+        return true
+    }
+}
+
+private final class CapturedURLClipboardDelegate: AztecTextViewPasteboardDelegate {
+    private(set) var pasteCount = 0
+    private(set) var pastedURL: URL?
+
+    override func tryPastingURL(in textView: TextView) -> Bool {
+        pasteCount += 1
+        pastedURL = textView.pasteboardURL
+        guard pastedURL != nil else { return false }
+        return super.tryPastingString(in: textView)
+    }
+}
+
+private final class DeferredPasteContent {
+    let provider = NSItemProvider()
+    let requested: XCTestExpectation
+    private var completions = [(Data?, Error?) -> Void]()
+    private var value: Data?
+    private var didRequest = false
+
+    init(requested: XCTestExpectation) {
+        self.requested = requested
+        provider.registerDataRepresentation(forTypeIdentifier: UIPasteboard.UTType.plainText.identifier, visibility: .all) { [weak self] completion in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                if let value = self.value {
+                    completion(value, nil)
+                } else {
+                    self.completions.append(completion)
+                }
+                if !self.didRequest {
+                    self.didRequest = true
+                    self.requested.fulfill()
+                }
+            }
+            return nil
+        }
+    }
+
+    func finish(with value: Data) {
+        self.value = value
+        let pending = completions
+        completions.removeAll()
+        for completion in pending {
+            completion(value, nil)
+        }
+    }
+}
+
+private final class RejectingPasteDelegate: NSObject, UITextViewDelegate {
+    private let validated: XCTestExpectation
+
+    init(validated: XCTestExpectation) {
+        self.validated = validated
+    }
+
+    func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
+        validated.fulfill()
+        return false
+    }
 }
