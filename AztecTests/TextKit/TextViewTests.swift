@@ -2145,20 +2145,33 @@ final class PendingPasteTests: XCTestCase {
 
     private func assertPasteReturnsBeforeProviderCompletes(matchingStyle: Bool) {
         let content = PasteReturnGatedContent()
+        NSLog("AZTEC_PASTE_TEST setter begin")
         UIPasteboard.forTesting.setItemProviders([content.provider], localOnly: true, expirationDate: nil)
+        NSLog("%@", "AZTEC_PASTE_TEST setter returned delivered=\(content.hasDelivered)")
+        NSLog("AZTEC_PASTE_TEST text view setup begin")
         let textView = TextViewStub(withHTML: "before")
         textView.selectedRange = NSRange(location: textView.text.utf16.count, length: 0)
         let changed = XCTNSNotificationExpectation(name: UITextView.textDidChangeNotification, object: textView)
+        NSLog("%@", "AZTEC_PASTE_TEST setup returned delivered=\(content.hasDelivered)")
+        XCTAssertFalse(content.hasDelivered, "The provider must remain deferred before paste starts")
+        guard !content.hasDelivered else {
+            content.allowDelivery()
+            return
+        }
 
+        NSLog("AZTEC_PASTE_TEST paste action begin")
         if matchingStyle {
             textView.pasteWithoutFormatting(nil)
         } else {
             textView.paste(nil)
         }
+        NSLog("%@", "AZTEC_PASTE_TEST paste action returned delivered=\(content.hasDelivered)")
 
         XCTAssertFalse(content.hasDelivered, "Paste must return before clipboard data is delivered")
         content.allowDelivery()
+        NSLog("AZTEC_PASTE_TEST provider delivery released")
         wait(for: [changed], timeout: 5)
+        NSLog("AZTEC_PASTE_TEST notification wait returned")
         XCTAssertEqual(textView.text, "before after")
     }
 
@@ -2362,13 +2375,21 @@ private final class PasteReturnGatedContent {
     init() {
         gate.enter()
         provider.registerDataRepresentation(forTypeIdentifier: UIPasteboard.UTType.plainText.identifier, visibility: .all) { [weak self] completion in
-            guard let self = self else { return nil }
+            NSLog("%@", "AZTEC_PASTE_TEST provider loader entered main=\(Thread.isMainThread)")
+            guard let self = self else {
+                NSLog("AZTEC_PASTE_TEST provider helper already released")
+                return nil
+            }
             DispatchQueue.global().async {
-                _ = self.gate.wait(timeout: .now() + 2)
+                NSLog("AZTEC_PASTE_TEST provider gate wait begin")
+                let result = self.gate.wait(timeout: .now() + 2)
+                NSLog("%@", "AZTEC_PASTE_TEST provider gate returned timedOut=\(result == .timedOut)")
                 self.lock.lock()
                 self.delivered = true
                 self.lock.unlock()
+                NSLog("AZTEC_PASTE_TEST provider completion begin")
                 completion(Data(" after".utf8), nil)
+                NSLog("AZTEC_PASTE_TEST provider completion returned")
             }
             return nil
         }
