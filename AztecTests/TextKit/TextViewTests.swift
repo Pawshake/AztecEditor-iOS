@@ -2120,6 +2120,7 @@ class TextViewTests: XCTestCase {
                 let textView = TextViewStub(withHTML: original)
                 textView.textColor = UIColor.red
                 textView.selectedRange = NSRange(location: 0, length: textView.text.utf16.count)
+                textView.typingAttributes[.foregroundColor] = UIColor.red
 
                 pasteAndWait(in: textView, matchingStyle: matchingStyle)
 
@@ -2132,10 +2133,15 @@ class TextViewTests: XCTestCase {
     }
 
     func testPasteRTFPreservesFormatting() throws {
-        let font = UIFont.boldSystemFont(ofSize: 20)
-        let source = NSAttributedString(string: "Rich text", attributes: [.font: font])
+        let font = UIFont(name: "Helvetica-Bold", size: 20)!
+        let source = NSAttributedString(string: "Rich text", attributes: [.font: font, .foregroundColor: UIColor.blue])
         let data = try source.data(from: NSRange(location: 0, length: source.length),
                                    documentAttributes: [.documentType: NSAttributedString.DocumentType.rtf])
+        let decoded = try NSAttributedString(data: data, options: [.documentType: NSAttributedString.DocumentType.rtf], documentAttributes: nil)
+        let decodedFont = decoded.attribute(.font, at: 0, effectiveRange: nil) as? UIFont
+        XCTAssertEqual(decodedFont?.pointSize, 20)
+        XCTAssertEqual(decodedFont?.fontDescriptor.symbolicTraits.contains(.traitBold), true)
+        XCTAssertNotNil(decoded.attribute(.foregroundColor, at: 0, effectiveRange: nil))
         UIPasteboard.forTesting.setData(data, forPasteboardType: UIPasteboard.UTType.RTFText.identifier)
         let textView = TextViewStub(withHTML: "")
 
