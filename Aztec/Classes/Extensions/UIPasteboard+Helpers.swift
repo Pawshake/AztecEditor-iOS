@@ -15,8 +15,11 @@ struct LoadedPasteboardContent: PasteboardReading {
     let representations: [String: Data]
 
     var url: URL? {
-        guard let value = representations[UIPasteboard.UTType.URL.identifier] else { return nil }
-        return URL(dataRepresentation: value, relativeTo: nil)
+        guard let value = representations[UIPasteboard.UTType.URL.identifier],
+              let url = try? NSURL.object(withItemProviderData: value, typeIdentifier: UIPasteboard.UTType.URL.identifier) else {
+            return nil
+        }
+        return url as URL
     }
 
     var hasURLs: Bool { url != nil }

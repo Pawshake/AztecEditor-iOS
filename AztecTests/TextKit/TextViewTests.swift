@@ -25,7 +25,10 @@ class TextViewTests: XCTestCase {
 
 
     private func pasteAndWait(in textView: TextView, matchingStyle: Bool = false) {
-        let changed = XCTNSNotificationExpectation(name: UITextView.textDidChangeNotification, object: textView)
+        let originalText = NSAttributedString(attributedString: textView.attributedText)
+        let changed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            return !textView.attributedText.isEqual(to: originalText)
+        }, object: nil)
         if matchingStyle {
             textView.pasteWithoutFormatting(nil)
         } else {
@@ -2092,7 +2095,8 @@ class TextViewTests: XCTestCase {
     func testPasteAttributedText() {
         let sourceAttributedText = NSAttributedString(string: "Hello world")
         var pasteItems = [String:Any]()
-        pasteItems[UIPasteboard.UTType.plainText.identifier] = try! sourceAttributedText.data(from: sourceAttributedText.rangeOfEntireString, documentAttributes: [.documentType: DocumentType.plain])
+        let data = Data(sourceAttributedText.string.utf8)
+        pasteItems[UIPasteboard.UTType.plainText.identifier] = data
         UIPasteboard.forTesting.setItems([pasteItems], options: [:])
         let textView = TextViewStub(withHTML: "")
         textView.textColor = UIColor.red
@@ -2100,11 +2104,13 @@ class TextViewTests: XCTestCase {
 
         let attributedString = textView.attributedText!
 
+        XCTAssertEqual(textView.text, "Hello world")
+        XCTAssertGreaterThan(attributedString.length, 0)
+        guard attributedString.length > 0 else { return }
         let attributes = attributedString.attributes(at: 0, effectiveRange: nil)
         if let colorSet = attributes[.foregroundColor] as? UIColor {
             XCTAssertEqual(colorSet, UIColor.red)
         }
-        XCTAssertEqual(textView.text, "Hello world")
     }
 
     /// Check that deleting all text resets the typying attributes to the default attributes
@@ -2170,12 +2176,8 @@ final class PendingPasteTests: XCTestCase {
     }
 
     func testCustomURLDelegateCanPasteCapturedPlainText() {
-        let provider = NSItemProvider()
         let url = URL(string: "https://example.com/embed")!
-        provider.registerDataRepresentation(forTypeIdentifier: UIPasteboard.UTType.URL.identifier, visibility: .all) { completion in
-            completion(url.dataRepresentation, nil)
-            return nil
-        }
+        let provider = NSItemProvider(object: url as NSURL)
         provider.registerDataRepresentation(forTypeIdentifier: UIPasteboard.UTType.plainText.identifier, visibility: .all) { completion in
             completion(Data("captured text".utf8), nil)
             return nil
