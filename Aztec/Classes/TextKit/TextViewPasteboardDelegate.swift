@@ -212,13 +212,22 @@ final class PendingPaste {
             }
             return
         }
-        candidate.provider.loadDataRepresentation(forTypeIdentifier: candidate.type) { data, _ in
+        let didLoad: (Data?) -> Void = { data in
             DispatchQueue.main.async {
                 guard self.currentTextView != nil else { return }
                 if let data = data {
                     self.representations[candidate.type] = data
                 }
                 self.start()
+            }
+        }
+        candidate.provider.loadDataRepresentation(forTypeIdentifier: candidate.type) { data, _ in
+            guard data == nil, candidate.type == UIPasteboard.UTType.plainText.identifier else {
+                didLoad(data)
+                return
+            }
+            candidate.provider.loadObject(ofClass: String.self) { string, _ in
+                didLoad(string.map { Data($0.utf8) })
             }
         }
     }

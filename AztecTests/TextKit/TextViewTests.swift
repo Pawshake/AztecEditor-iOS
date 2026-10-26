@@ -2113,6 +2113,19 @@ class TextViewTests: XCTestCase {
         }
     }
 
+    func testPastePlainTextStoredAsString() {
+        UIPasteboard.forTesting.string = "Hello world"
+        let textView = TextViewStub(withHTML: "")
+        textView.textColor = UIColor.red
+
+        pasteAndWait(in: textView)
+
+        XCTAssertEqual(textView.text, "Hello world")
+        XCTAssertGreaterThan(textView.attributedText.length, 0)
+        guard textView.attributedText.length > 0 else { return }
+        XCTAssertEqual(textView.attributedText.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? UIColor, UIColor.red)
+    }
+
     /// Check that deleting all text resets the typying attributes to the default attributes
     func testDeleteAllTextSetTypyingAttributesToDefault() {
         let textView = TextViewStub(withHTML: "<p style=\"color:0xFF0000\">Hello world</p>")
