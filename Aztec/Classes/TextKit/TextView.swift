@@ -176,6 +176,19 @@ open class TextView: UITextView {
     /// An injectable pasteboard – important for automated testing (where the user can't approve a paste operation)
     ///
     var pasteboard: UIPasteboard = UIPasteboard.general
+    var loadedPasteboardContent: LoadedPasteboardContent?
+    var pendingPasteIdentifier: UUID?
+
+    var pasteboardContent: PasteboardReading {
+        if let content = loadedPasteboardContent {
+            return content
+        }
+        return pasteboard
+    }
+
+    public var pasteboardURL: URL? {
+        return pasteboardContent.url
+    }
 
     /// If this is true the text view will notify is delegate and notification system when changes happen by calls to methods like setHTML
     ///
@@ -517,17 +530,17 @@ open class TextView: UITextView {
     }
 
     open override func paste(_ sender: Any?) {
-        guard pasteboardDelegate.tryPasting(in: self) else {
-            super.paste(sender)
-            return
-        }
+        pasteUsingItemProviders(matchingStyle: false)
     }
 
     @objc open func pasteWithoutFormatting(_ sender: Any?) {
-        guard pasteboardDelegate.tryPastingString(in: self) else {
-            super.paste(sender)
-            return
-        }
+        pasteUsingItemProviders(matchingStyle: true)
+    }
+
+    private func pasteUsingItemProviders(matchingStyle: Bool) {
+        let identifier = UUID()
+        pendingPasteIdentifier = identifier
+        PendingPaste(textView: self, identifier: identifier, matchingStyle: matchingStyle).start()
     }
 
     // MARK: - Intercept Keystrokes

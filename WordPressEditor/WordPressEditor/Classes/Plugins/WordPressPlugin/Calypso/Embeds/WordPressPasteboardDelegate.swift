@@ -7,11 +7,9 @@ class WordPressTextViewPasteboardDelegate: AztecTextViewPasteboardDelegate {
 
         let selectedRange = textView.selectedRange
 
-        /// TODO: support pasting multiple URLs
-        guard UIPasteboard.general.hasURLs,             // There are URLs on the pasteboard
-            let url = UIPasteboard.general.url,         // We can get the first one
-            selectedRange.length == 0,                  // No text is selected in the TextView
-            EmbedURLProcessor(url: url).isValidEmbed    // The pasteboard contains an embeddable URL
+        guard let url = textView.pasteboardURL,
+            selectedRange.length == 0,
+            EmbedURLProcessor(url: url).isValidEmbed
             else {
                 return super.tryPastingURL(in: textView)
         }

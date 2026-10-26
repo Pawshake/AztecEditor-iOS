@@ -20,8 +20,8 @@ open class AztecTextViewPasteboardDelegate: TextViewPasteboardDelegate {
     /// - Returns: True if the paste succeeds, false if it does not.
     ///
     open func tryPastingURL(in textView: TextView) -> Bool {
-        guard textView.pasteboard.hasURLs,
-            let url = textView.pasteboard.url else {
+        guard textView.pasteboardContent.hasURLs,
+            let url = textView.pasteboardContent.url else {
                 return false
         }
 
@@ -44,7 +44,7 @@ open class AztecTextViewPasteboardDelegate: TextViewPasteboardDelegate {
     /// - Returns: True if the paste succeeds, false if it does not.
     ///
     open func tryPastingHTML(in textView: TextView) -> Bool {
-        guard let html = textView.pasteboard.html(),
+        guard let html = textView.pasteboardContent.html(),
             textView.storage.htmlConverter.isSupported(html) else {
                 return false
         }
@@ -62,7 +62,7 @@ open class AztecTextViewPasteboardDelegate: TextViewPasteboardDelegate {
     /// - Returns: True if the paste succeeds, false if it does not.
     ///
     open func tryPastingAttributedString(in textView: TextView) -> Bool {
-        guard let string = textView.pasteboard.attributedString() else {
+        guard let string = textView.pasteboardContent.attributedString() else {
             return false
         }
         string.loadLazyAttachments()
@@ -112,7 +112,7 @@ open class AztecTextViewPasteboardDelegate: TextViewPasteboardDelegate {
     /// - Returns: True if the paste succeeds, false if it does not.
     ///
     open func tryPastingString(in textView: TextView) -> Bool {
-        guard let string = textView.pasteboard.attributedString() else {
+        guard let string = textView.pasteboardContent.attributedString() else {
             return false
         }
 
@@ -151,4 +151,88 @@ open class AztecTextViewPasteboardDelegate: TextViewPasteboardDelegate {
         return true
     }
 
+}
+
+final class PendingPaste {
+    private weak var textView: TextView?
+    private weak var window: UIWindow?
+    private let identifier: UUID
+    private let matchingStyle: Bool
+    private let selectedRange: NSRange
+    private let originalText: NSAttributedString
+    private let wasFirstResponder: Bool
+    private let providers: [NSItemProvider]
+    private var candidates: ArraySlice<(provider: NSItemProvider, type: String)>
+    private var representations = [String: Data]()
+
+    init(textView: TextView, identifier: UUID, matchingStyle: Bool) {
+        self.textView = textView
+        self.window = textView.window
+        self.identifier = identifier
+        self.matchingStyle = matchingStyle
+        self.selectedRange = textView.selectedRange
+        self.originalText = NSAttributedString(attributedString: textView.attributedText)
+        self.wasFirstResponder = textView.isFirstResponder
+        let providers = textView.pasteboard.itemProviders
+        self.providers = providers
+
+        var types = [NSAttributedString.pasteboardUTI.identifier,
+                     UIPasteboard.UTType.RTFDText.identifier,
+                     UIPasteboard.UTType.RTFText.identifier,
+                     UIPasteboard.UTType.richText.identifier,
+                     UIPasteboard.UTType.plainText.identifier]
+        if !matchingStyle {
+            types.insert(contentsOf: [UIPasteboard.UTType.URL.identifier,
+                                      UIPasteboard.UTType.html.identifier], at: 0)
+        }
+        self.candidates = ArraySlice(types.flatMap { type in
+            providers.filter { $0.hasItemConformingToTypeIdentifier(type) }
+                .map { (provider: $0, type: type) }
+        })
+    }
+
+    func start() {
+        guard let textView = currentTextView else { return }
+        while let candidate = candidates.first, representations[candidate.type] != nil {
+            candidates.removeFirst()
+        }
+        guard let candidate = candidates.popFirst() else {
+            textView.loadedPasteboardContent = LoadedPasteboardContent(representations: representations)
+            let pasted: Bool
+            if matchingStyle {
+                pasted = textView.pasteboardDelegate.tryPastingString(in: textView)
+            } else {
+                pasted = textView.pasteboardDelegate.tryPasting(in: textView)
+            }
+            textView.loadedPasteboardContent = nil
+            if textView.pendingPasteIdentifier == identifier {
+                textView.pendingPasteIdentifier = nil
+                if !pasted {
+                    textView.paste(itemProviders: providers)
+                }
+            }
+            return
+        }
+        candidate.provider.loadDataRepresentation(forTypeIdentifier: candidate.type) { data, _ in
+            DispatchQueue.main.async {
+                guard self.currentTextView != nil else { return }
+                if let data = data {
+                    self.representations[candidate.type] = data
+                }
+                self.start()
+            }
+        }
+    }
+
+    private var currentTextView: TextView? {
+        guard let textView = textView,
+              textView.pendingPasteIdentifier == identifier,
+              textView.window === window,
+              textView.isFirstResponder == wasFirstResponder,
+              textView.selectedRange == selectedRange,
+              textView.attributedText.isEqual(to: originalText) else {
+            return nil
+        }
+        return textView
+    }
 }

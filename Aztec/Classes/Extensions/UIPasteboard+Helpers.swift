@@ -3,9 +3,30 @@ import UniformTypeIdentifiers
 import MobileCoreServices
 import UIKit
 
-// MARK: - Pasteboard Helpers
-//
-extension UIPasteboard {
+protocol PasteboardReading {
+    var hasURLs: Bool { get }
+    var url: URL? { get }
+    func data(forPasteboardType pasteboardType: String) -> Data?
+}
+
+extension UIPasteboard: PasteboardReading {}
+
+struct LoadedPasteboardContent: PasteboardReading {
+    let representations: [String: Data]
+
+    var url: URL? {
+        guard let value = representations[UIPasteboard.UTType.URL.identifier] else { return nil }
+        return URL(dataRepresentation: value, relativeTo: nil)
+    }
+
+    var hasURLs: Bool { url != nil }
+
+    func data(forPasteboardType pasteboardType: String) -> Data? {
+        return representations[pasteboardType]
+    }
+}
+
+extension PasteboardReading {
 
     /// Attempts to retrieve the Pasteboard's contents as an attributed string, if possible.
     ///
@@ -31,12 +52,16 @@ extension UIPasteboard {
     }
     
     func html() -> String? {
-        guard let htmlData = data(forPasteboardType: UTType.html.identifier) else {
+        guard let htmlData = data(forPasteboardType: UIPasteboard.UTType.html.identifier) else {
             return nil
         }
         
         return String(data: htmlData, encoding: .utf8)
     }
+
+}
+
+extension UIPasteboard {
 
     // Compatibility Helper for using UTType before iOS14's UniformTypeIdentifiers
     // Feel free to remove once Deployment Target of the project gets bumped to >14.0
@@ -98,7 +123,7 @@ extension UIPasteboard {
 
 // MARK: - Attributed String Conversion
 
-private extension UIPasteboard {
+private extension PasteboardReading {
 
     // MARK: -
     /// Attempts to unarchive the Pasteboard's Aztec-Archived String
@@ -114,37 +139,28 @@ private extension UIPasteboard {
     /// Attempts to unarchive the Pasteboard's Plain Text contents into an Attributed String
     ///
     private func plainTextAttributedString() -> NSAttributedString? {
-        return unarchiveAttributedString(fromPasteboardType: .plainText, with: StringOptions.plainText)
+        return unarchiveAttributedString(fromPasteboardType: .plainText, with: PasteboardStringOptions.plainText)
     }
     
     /// Attempts to unarchive the Pasteboard's Text contents into an Attributed String
     ///
     private func richTextAttributedString() -> NSAttributedString? {
-        return unarchiveAttributedString(fromPasteboardType: .richText, with: StringOptions.RTFText)
+        return unarchiveAttributedString(fromPasteboardType: .richText, with: PasteboardStringOptions.RTFText)
     }
     
     /// Attempts to unarchive the Pasteboard's RTF contents into an Attributed String
     ///
     private func rtfAttributedString() -> NSAttributedString? {
-        return unarchiveAttributedString(fromPasteboardType: .RTFText, with: StringOptions.RTFText)
+        return unarchiveAttributedString(fromPasteboardType: .RTFText, with: PasteboardStringOptions.RTFText)
     }
 
     /// Attempts to unarchive the Pasteboard's RTFD contents into an Attributed String
     ///
     private func rtfdAttributedString() -> NSAttributedString? {
-        return unarchiveAttributedString(fromPasteboardType: .RTFDText, with: StringOptions.RTFDText)
+        return unarchiveAttributedString(fromPasteboardType: .RTFDText, with: PasteboardStringOptions.RTFDText)
     }
 
     // MARK: - Helpers
-
-    /// String Initialization Options
-    ///
-    private struct StringOptions {
-        static let html: [DocumentReadingOptionKey: DocumentType] = [.documentType: .html]
-        static let plainText: [DocumentReadingOptionKey: DocumentType] = [.documentType: .plain]
-        static let RTFText: [DocumentReadingOptionKey: DocumentType] = [.documentType: .rtf]
-        static let RTFDText: [DocumentReadingOptionKey: DocumentType] = [.documentType: .rtfd]
-    }
 
     /// Attempts to unarchive a Pasteboard's Entry into a NSAttributedString Instance.
     ///
@@ -154,11 +170,18 @@ private extension UIPasteboard {
     ///
     /// - Returns: NSAttributed String with the contents of the specified Pasteboard entry, if any.
     ///
-    private func unarchiveAttributedString(fromPasteboardType type: UTType, with options: [DocumentReadingOptionKey: Any]) -> NSAttributedString? {
+    private func unarchiveAttributedString(fromPasteboardType type: UIPasteboard.UTType, with options: [DocumentReadingOptionKey: Any]) -> NSAttributedString? {
         guard let data = data(forPasteboardType: type.identifier) else {
             return nil
         }
         
         return try? NSAttributedString(data: data, options: options, documentAttributes: nil)
     }
+}
+
+private struct PasteboardStringOptions {
+    static let html: [DocumentReadingOptionKey: DocumentType] = [.documentType: .html]
+    static let plainText: [DocumentReadingOptionKey: DocumentType] = [.documentType: .plain]
+    static let RTFText: [DocumentReadingOptionKey: DocumentType] = [.documentType: .rtf]
+    static let RTFDText: [DocumentReadingOptionKey: DocumentType] = [.documentType: .rtfd]
 }
