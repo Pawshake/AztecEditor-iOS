@@ -2132,30 +2132,38 @@ class TextViewTests: XCTestCase {
         let generic = UIPasteboard.UTType.richText.identifier
         var boards = [UIPasteboard]()
         var providers = [NSItemProvider]()
+        var editors = [TextViewStub]()
         var completed = [XCTestExpectation]()
         defer {
             for board in boards { UIPasteboard.remove(withName: board.name) }
         }
 
+        for scenario in ["fresh", "reset", "editor"] {
         for producer in ["string", "data"] {
             func makeBoard() -> UIPasteboard {
                 let board = UIPasteboard.withUniqueName()
                 boards.append(board)
+                if scenario == "reset" { board.items = [[:]] }
                 if producer == "string" {
                     board.string = text
                 } else {
                     board.setItems([[utf8: Data(text.utf8)]], options: [:])
                 }
+                if scenario == "editor" {
+                    let editor = TextViewStub(withHTML: "", pasteboard: board)
+                    editor.textColor = UIColor.red
+                    editors.append(editor)
+                }
                 return board
             }
 
             let baseline = makeBoard()
-            NSLog("%@", "AZTEC_PLAIN_PROBE producer=\(producer) baselineStringLength=\(baseline.string?.utf16.count ?? -1) types=\(baseline.types)")
+            NSLog("%@", "AZTEC_PLAIN_PROBE scenario=\(scenario) producer=\(producer) baselineStringLength=\(baseline.string?.utf16.count ?? -1) types=\(baseline.types)")
             XCTAssertEqual(baseline.string, text)
 
             for api in ["data-exact", "data-generic", "object", "item"] {
                 let board = makeBoard()
-                let label = "producer=\(producer) api=\(api)"
+                let label = "scenario=\(scenario) producer=\(producer) api=\(api)"
                 guard let provider = board.itemProviders.first else {
                     XCTFail("No item provider for \(label)")
                     continue
@@ -2184,8 +2192,10 @@ class TextViewTests: XCTestCase {
                 }
             }
         }
+        }
         wait(for: completed, timeout: 5)
         withExtendedLifetime(providers) {}
+        withExtendedLifetime(editors) {}
     }
 
     /// Check that deleting all text resets the typying attributes to the default attributes
