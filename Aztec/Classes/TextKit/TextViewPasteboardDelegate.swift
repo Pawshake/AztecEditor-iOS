@@ -185,18 +185,22 @@ final class PendingPaste {
                                       UIPasteboard.UTType.html.identifier], at: 0)
         }
         self.candidates = ArraySlice(types.flatMap { type in
-            providers.filter { $0.hasItemConformingToTypeIdentifier(type) }
+            providers.filter { provider in
+                if type == UIPasteboard.UTType.richText.identifier {
+                    return provider.registeredTypeIdentifiers.contains(type)
+                }
+                return provider.hasItemConformingToTypeIdentifier(type)
+            }
                 .map { (provider: $0, type: type) }
         })
     }
 
     func start() {
-        guard let textView = currentTextView else { NSLog("AZTEC_FLOW start stale"); return }
+        guard let textView = currentTextView else { return }
         while let candidate = candidates.first, representations[candidate.type] != nil {
             candidates.removeFirst()
         }
         guard let candidate = candidates.popFirst() else {
-            NSLog("%@", "AZTEC_FLOW finish types=\(representations.mapValues { $0.count })")
             textView.loadedPasteboardContent = LoadedPasteboardContent(representations: representations)
             let pasted: Bool
             if matchingStyle {
@@ -213,24 +217,13 @@ final class PendingPaste {
             }
             return
         }
-        NSLog("%@", "AZTEC_FLOW request type=\(candidate.type)")
-        let didLoad: (Data?) -> Void = { data in
-            NSLog("%@", "AZTEC_FLOW response type=\(candidate.type) bytes=\(data?.count ?? -1)")
+        candidate.provider.loadDataRepresentation(forTypeIdentifier: candidate.type) { data, _ in
             DispatchQueue.main.async {
-                guard self.currentTextView != nil else { NSLog("AZTEC_FLOW response stale"); return }
+                guard self.currentTextView != nil else { return }
                 if let data = data {
                     self.representations[candidate.type] = data
                 }
                 self.start()
-            }
-        }
-        candidate.provider.loadDataRepresentation(forTypeIdentifier: candidate.type) { data, _ in
-            guard data == nil, candidate.type == UIPasteboard.UTType.plainText.identifier else {
-                didLoad(data)
-                return
-            }
-            candidate.provider.loadObject(ofClass: String.self) { string, _ in
-                didLoad(string.map { Data($0.utf8) })
             }
         }
     }

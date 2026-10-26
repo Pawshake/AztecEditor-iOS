@@ -2114,88 +2114,38 @@ class TextViewTests: XCTestCase {
     }
 
     func testPastePlainTextStoredAsString() {
-        UIPasteboard.forTesting.string = "Hello world"
+        for matchingStyle in [false, true] {
+            for original in ["", "replace me"] {
+                UIPasteboard.forTesting.string = "Hello world"
+                let textView = TextViewStub(withHTML: original)
+                textView.textColor = UIColor.red
+                textView.selectedRange = NSRange(location: 0, length: textView.text.utf16.count)
+
+                pasteAndWait(in: textView, matchingStyle: matchingStyle)
+
+                XCTAssertEqual(textView.text, "Hello world")
+                XCTAssertGreaterThan(textView.attributedText.length, 0)
+                guard textView.attributedText.length > 0 else { continue }
+                XCTAssertEqual(textView.attributedText.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? UIColor, UIColor.red)
+            }
+        }
+    }
+
+    func testPasteRTFPreservesFormatting() throws {
+        let font = UIFont.boldSystemFont(ofSize: 20)
+        let source = NSAttributedString(string: "Rich text", attributes: [.font: font])
+        let data = try source.data(from: NSRange(location: 0, length: source.length),
+                                   documentAttributes: [.documentType: NSAttributedString.DocumentType.rtf])
+        UIPasteboard.forTesting.setData(data, forPasteboardType: UIPasteboard.UTType.RTFText.identifier)
         let textView = TextViewStub(withHTML: "")
-        textView.textColor = UIColor.red
 
         pasteAndWait(in: textView)
 
-        XCTAssertEqual(textView.text, "Hello world")
-        XCTAssertGreaterThan(textView.attributedText.length, 0)
-        guard textView.attributedText.length > 0 else { return }
-        XCTAssertEqual(textView.attributedText.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? UIColor, UIColor.red)
-    }
-
-    func testPlainClipboardProviderRepresentations() {
-        let text = "Hello world"
-        let utf8 = UIPasteboard.UTType.plainText.identifier
-        let generic = UIPasteboard.UTType.richText.identifier
-        var boards = [UIPasteboard]()
-        var providers = [NSItemProvider]()
-        var editors = [TextViewStub]()
-        var completed = [XCTestExpectation]()
-        defer {
-            for board in boards { UIPasteboard.remove(withName: board.name) }
-        }
-
-        for scenario in ["fresh", "reset", "editor"] {
-        for producer in ["string", "data"] {
-            func makeBoard() -> UIPasteboard {
-                let board = UIPasteboard.withUniqueName()
-                boards.append(board)
-                if scenario == "reset" { board.items = [[:]] }
-                if producer == "string" {
-                    board.string = text
-                } else {
-                    board.setItems([[utf8: Data(text.utf8)]], options: [:])
-                }
-                if scenario == "editor" {
-                    let editor = TextViewStub(withHTML: "", pasteboard: board)
-                    editor.textColor = UIColor.red
-                    editors.append(editor)
-                }
-                return board
-            }
-
-            let baseline = makeBoard()
-            NSLog("%@", "AZTEC_PLAIN_PROBE scenario=\(scenario) producer=\(producer) baselineStringLength=\(baseline.string?.utf16.count ?? -1) types=\(baseline.types)")
-            XCTAssertEqual(baseline.string, text)
-
-            for api in ["data-exact", "data-generic", "object", "item"] {
-                let board = makeBoard()
-                let label = "scenario=\(scenario) producer=\(producer) api=\(api)"
-                guard let provider = board.itemProviders.first else {
-                    XCTFail("No item provider for \(label)")
-                    continue
-                }
-                providers.append(provider)
-                NSLog("%@", "AZTEC_PLAIN_PROBE \(label) registered=\(provider.registeredTypeIdentifiers) conformsUTF8=\(provider.hasItemConformingToTypeIdentifier(utf8)) conformsText=\(provider.hasItemConformingToTypeIdentifier(generic)) canLoadString=\(provider.canLoadObject(ofClass: String.self))")
-                let done = expectation(description: label)
-                completed.append(done)
-                let finish: (Any?, Error?) -> Void = { value, error in
-                    let error = error as NSError?
-                    let kind = value.map { String(reflecting: type(of: $0)) } ?? "nil"
-                    let bytes = (value as? Data)?.count ?? -1
-                    let length = (value as? String)?.utf16.count ?? -1
-                    NSLog("%@", "AZTEC_PLAIN_PROBE \(label) resultType=\(kind) bytes=\(bytes) stringLength=\(length) errorDomain=\(error?.domain ?? "none") errorCode=\(error?.code ?? 0) main=\(Thread.isMainThread)")
-                    done.fulfill()
-                }
-                switch api {
-                case "data-exact":
-                    provider.loadDataRepresentation(forTypeIdentifier: utf8) { finish($0, $1) }
-                case "data-generic":
-                    provider.loadDataRepresentation(forTypeIdentifier: generic) { finish($0, $1) }
-                case "object":
-                    provider.loadObject(ofClass: String.self) { finish($0, $1) }
-                default:
-                    provider.loadItem(forTypeIdentifier: utf8, options: nil) { finish($0, $1) }
-                }
-            }
-        }
-        }
-        wait(for: completed, timeout: 5)
-        withExtendedLifetime(providers) {}
-        withExtendedLifetime(editors) {}
+        XCTAssertEqual(textView.text, source.string)
+        guard textView.attributedText.length > 0 else { return XCTFail("Missing rich text") }
+        let pastedFont = textView.attributedText.attribute(.font, at: 0, effectiveRange: nil) as? UIFont
+        XCTAssertEqual(pastedFont?.pointSize, 20)
+        XCTAssertEqual(pastedFont?.fontDescriptor.symbolicTraits.contains(.traitBold), true)
     }
 
     /// Check that deleting all text resets the typying attributes to the default attributes
